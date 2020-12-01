@@ -1,11 +1,15 @@
+# flake8: noqa
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class Conv2dBatchNorm(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padiing=0, dilation=0, bias=0):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding=0, dilation=0, bias=0):
         super(Conv2dBatchNorm, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padiing, dilation, bias)
+        self.conv = nn.Conv2d(in_channels, out_channels,
+                              kernel_size, stride, padding, dilation, bias)
         self.batchnorm = nn.BatchNorm2d(out_channels)
         self.relu = nn.ReLU(inplace=True)
 
@@ -22,17 +26,21 @@ class FaceEncoder(nn.Module):
         self.conv_bn_1 = Conv2dBatchNorm(2, 64, kernel_size=4, stride=1)
         self.conv_bn_2 = Conv2dBatchNorm(64, 64, kernel_size=4, stride=1)
         self.conv_bn_3 = Conv2dBatchNorm(64, 128, kernel_size=4, stride=1)
-        self.maxpool_1 = nn.MaxPool2d(kernel_size=(2,1)) # stride equals kernel_size
+        # stride equals kernel_size
+        self.maxpool_1 = nn.MaxPool2d(kernel_size=(2, 1))
         self.conv_bn_4 = Conv2dBatchNorm(128, 128, kernel_size=4, stride=1)
-        self.maxpool_2 = nn.MaxPool2d(kernel_size=(2,1)) # stride equals kernel_size
+        # stride equals kernel_size
+        self.maxpool_2 = nn.MaxPool2d(kernel_size=(2, 1))
         self.conv_bn_5 = Conv2dBatchNorm(128, 128, kernel_size=4, stride=1)
-        self.maxpool_3 = nn.MaxPool2d(kernel_size=(2,1)) # stride equals kernel_size
+        # stride equals kernel_size
+        self.maxpool_3 = nn.MaxPool2d(kernel_size=(2, 1))
         self.conv_bn_6 = Conv2dBatchNorm(128, 256, kernel_size=4, stride=1)
-        self.maxpool_4 = nn.MaxPool2d(kernel_size=(2,1)) # stride equals kernel_size
+        # stride equals kernel_size
+        self.maxpool_4 = nn.MaxPool2d(kernel_size=(2, 1))
         self.conv_bn_7 = Conv2dBatchNorm(256, 512, kernel_size=4, stride=1)
         self.conv_bn_8 = Conv2dBatchNorm(512, 512, kernel_size=4, stride=2)
         self.conv_9 = nn.Conv2d(512, 512, kernel_size=4, stride=2)
-        self.avgpool_1 = nn.AvgPool2d(kernel_size=(6,1), stride=1)
+        self.avgpool_1 = nn.AvgPool2d(kernel_size=(6, 1), stride=1)
         self.bn_9 = nn.BatchNorm2d(512)
         self.relu_9 = nn.ReLU(inplace=True)
         self.fc_1 = nn.Linear(512, 4096)
@@ -61,3 +69,7 @@ class FaceEncoder(nn.Module):
         outputs = self.fc_2(x)
 
         return outputs
+
+
+if __name__ == "__main__":
+    model = FaceEncoder()
