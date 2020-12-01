@@ -15,6 +15,7 @@ from model import FaceEncoder
 import torchvision.models as models
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True  # デフォルトでは無視される画像もロード
+torch.cuda.empty_cache()  # メモリーのクリア
 
 
 def extract_lab(path):
@@ -23,6 +24,9 @@ def extract_lab(path):
 
 
 img_paths = sorted(glob('data/test/*/*.jpg'))  # noqa
+
+img_paths = img_paths[:2500]
+
 raw_labels = [extract_lab(x) for x in img_paths]
 labels = LabelEncoder().fit_transform(raw_labels)
 
@@ -59,7 +63,7 @@ transforms = Compose([
     Resize((224, 224)),  # for vgg16
     ToTensor(),
 ])
-batch_size = 1
+batch_size = 50
 
 dataset = FaceDataset(img_paths, labels, transform=transforms)
 loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -103,16 +107,22 @@ class my_vgg16_bn(nn.Module):
 """     setup model         """
 # n_classes = 1000
 n_classes = len(set(labels))
-lr = 0.01
+lr = 0.001
 # NOTE: 特徴抽出層は完全に凍結してるが、学習する内容的に学習し直した方がいい
 #       人物分類で事前学習したほうがよいかもしれない
 model = my_vgg16_bn(out_features=n_classes)
 # HACK: featuresの上にmodelという階層ができてしまっているので、モデルクラス内での学習済みモデルの利用を改良したい
+#       CNNのrequires_gradをTrueにするとメモリーが枯渇する
 for param in model.model.features.parameters():  # CNN
     param.requires_grad = False
-# for param in model.model.classifier.parameters(): # FC
-#     param.requires_grad = False
+# for param in model.model.features[-10:].parameters():  # CNN
+#     param.requires_grad = True
+for param in model.model.classifier.parameters():  # FC
+    param.requires_grad = True
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print("using device :", device)
+model = model.to(device).train()
 
 optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
 criterion = nn.CrossEntropyLoss()
@@ -127,28 +137,26 @@ print("-"*30)
 # print(out.size())
 # print(out)
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print("using device :", device)
-
-model.to(device).train()
 for epoch in range(10):
     running_loss = 0.0
     total = 0.0
     correct = 0.0
     for imgs, true_labs in tqdm(loader):
-        imgs.to(device)
-        true_labs.to(device)
+        # .to(deveice)が再代入じゃないと機能しないときあり
+        imgs, true_labs = imgs.to(device), true_labs.to(device)
 
-        optimizer.zero_grad()
-        outputs = model(imgs)
-        loss = criterion(outputs, true_labs)
-        loss.backward()
-        optimizer.step()
+        with torch.set_grad_enabled(True):  # これがないときまったく学習すすまなかった、デフォだと無効？
+            optimizer.zero_grad()
+            outputs = model(imgs)
+            pred_labs = outputs.argmax(dim=1)
+            loss = criterion(outputs, true_labs)
+            loss.backward()
+            optimizer.step()
 
         running_loss += loss.item()
-        total += imgs.size(0)
-        correct += (outputs == true_labs).sum().item()
-    print('Accuracy: {:.2f} %%'.format(100 * float(correct/total)))
-    print(f"epoch:{epoch} , loss:{running_loss}")
+        total += true_labs.size(0)
+        correct += (pred_labs == true_labs).sum().item()
+    print('Accuracy: {:.2f} %'.format(100 * float(correct/total)))
+    print(f"epoch:{epoch+1} , loss:{running_loss}")
 
 torch.save(model.state_dict(), './weight/model.pth')
