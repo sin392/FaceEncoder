@@ -4,7 +4,7 @@ import os
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from torchvision.transforms import Compose, ToTensor, Resize
+from torchvision.transforms import Compose, ToTensor, Resize, Normalize
 from sklearn.preprocessing import LabelEncoder
 from glob import glob
 from PIL import Image, ImageFile
@@ -62,6 +62,7 @@ class FaceDataset(Dataset):
 transforms = Compose([
     Resize((224, 224)),  # for vgg16
     ToTensor(),
+    Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
 ])
 batch_size = 50
 
@@ -107,7 +108,7 @@ class my_vgg16_bn(nn.Module):
 """     setup model         """
 # n_classes = 1000
 n_classes = len(set(labels))
-lr = 0.001
+lr = 0.0005
 # NOTE: 特徴抽出層は完全に凍結してるが、学習する内容的に学習し直した方がいい
 #       人物分類で事前学習したほうがよいかもしれない
 model = my_vgg16_bn(out_features=n_classes)
@@ -115,8 +116,10 @@ model = my_vgg16_bn(out_features=n_classes)
 #       CNNのrequires_gradをTrueにするとメモリーが枯渇する
 for param in model.model.features.parameters():  # CNN
     param.requires_grad = False
-# for param in model.model.features[-10:].parameters():  # CNN
-#     param.requires_grad = True
+for param in model.model.features[-10:].parameters():  # CNN
+    param.requires_grad = True
+for param in model.model.avgpool.parameters():  # AVGPOOL
+    param.requires_grad = True
 for param in model.model.classifier.parameters():  # FC
     param.requires_grad = True
 
