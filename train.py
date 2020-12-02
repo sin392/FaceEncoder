@@ -1,21 +1,22 @@
 # flake8: noqa
 
+import torchvision.models as models
+from model import FaceEncoder
+import collections
+import numpy as np
+from datetime import datetime
+import time
+from tqdm import tqdm
+from PIL import Image, ImageFile
+from glob import glob
+from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 import os
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms import Compose, ToTensor, Resize, Normalize
-from sklearn.preprocessing import OneHotEncoder, LabelEncoder
-from glob import glob
-from PIL import Image, ImageFile
-from tqdm import tqdm
-import time
-from datetime import datetime
-import numpy as np
-import collections
 
-from model import FaceEncoder
-import torchvision.models as models
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True  # デフォルトでは無視される画像もロード
 torch.cuda.empty_cache()  # メモリーのクリア
