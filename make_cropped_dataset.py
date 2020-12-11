@@ -1,11 +1,10 @@
-# %%
-from IPython.display import display
 from PIL import Image, ImageFile
 from facenet_pytorch import MTCNN
 from glob import glob
 import os
 from tqdm import tqdm
 import argparse
+import torch
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -25,9 +24,11 @@ print('batch_size :', batch_size)
 print('image_size :', image_size)
 print('images :', len(img_paths))
 
-model = MTCNN(image_size=image_size, select_largest=True, post_process=False)
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print('device :', device)
+model = MTCNN(image_size=image_size, select_largest=True,
+              post_process=False, device=device)
 
-# %%
 for i in tqdm(range(0, len(img_paths), batch_size)):
     batch_paths = img_paths[i:i+batch_size]
     batch_img = [Image.open(path).resize((image_size, image_size))
@@ -44,4 +45,3 @@ for i in tqdm(range(0, len(img_paths), batch_size)):
                 model(batch_img[j], save_path=save_paths[j])
             except Exception:
                 print(f'face not found : {batch_paths[j]}')
-# %%
