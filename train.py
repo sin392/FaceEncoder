@@ -94,6 +94,7 @@ if __name__ == "__main__":
     img_paths = img_paths[:5000]
 
     raw_labels = [extract_lab(x) for x in img_paths]
+    n_classes = len(set(raw_labels))
 
     # labels = OneHotEncoder().fit_transform(np.array(raw_labels).reshape(-1, 1))
     labels = LabelEncoder().fit_transform(raw_labels)
@@ -102,6 +103,14 @@ if __name__ == "__main__":
     print("Number of unique labels :", len(set(raw_labels)))
     print(collections.Counter(raw_labels))  # NOTE: count value is sorted
     print("-" * 30)
+
+    # dummy embedding dict
+    dummy_embeddings = torch.zeros(n_classes, 2048)
+    print(dummy_embeddings)
+    # TODO: embeddingsとraw_labelsのクラスの対応があってるか要確認
+    # どこかでソートはいってるかもしれない
+    embedding_dict = {list(set(raw_labels))[i]: dummy_embeddings[i]
+                      for i in range(n_classes)}
 
     """     setup data         """
     # TODO: リサイズのサイズ策定
@@ -118,7 +127,6 @@ if __name__ == "__main__":
 
     """     setup model         """
     # n_classes = 1000
-    n_classes = len(set(raw_labels))
     lr = 0.0005
     # NOTE: 特徴抽出層は完全に凍結してるが、学習する内容的に学習し直した方がいい
     #       人物分類で事前学習したほうがよいかもしれない
@@ -143,6 +151,10 @@ if __name__ == "__main__":
     print("loss :", criterion)
     print("-" * 30)
 
+    loss_weight = 0
+    print("loss_weight :", loss_weight)
+    extra_criterion = nn.MSELoss()
+
     """     train loop          """
     for epoch in range(60):
         running_loss = total = correct = 0.0
@@ -155,7 +167,11 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 outputs = model(imgs)
                 pred_labs = outputs.argmax(dim=1)
-                loss = criterion(outputs, true_labs)
+                # TODO: embeddingsの名前の変更、embeddingのtensorとして適切にラップできてるかの確認
+                embeddings = torch.Tensor([embedding_dict[true_labs[i]]
+                                           for i in range(batch_size)])
+                loss = criterion(outputs, true_labs) + loss_weight * \
+                    (0.5 * n_classes * extra_criterion(outputs, embeddings))
                 loss.backward()
                 optimizer.step()
 
