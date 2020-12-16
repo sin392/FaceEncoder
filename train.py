@@ -16,15 +16,19 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms import Compose, ToTensor, Resize, Normalize
+import argparse
 
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True  # デフォルトでは無視される画像もロード
 torch.cuda.empty_cache()  # メモリーのクリア
 
 
-def save_weight(model, epoch, output_dir="weight"):
+def save_weight(model, epoch, output_dir="weight", best=True):
     date = datetime.now.strftime("%Y-%m-%d-%H-%M-%S")
-    fname = f'{date}-epoch{epoch}.pth'
+    if best:
+        fname = f'{date}-epoch{epoch}.pth'
+    else:
+        fname = f'{date}-epoch{epoch}-best.pth'
     torch.save(model.state_dict(), os.path.join(output_dir, fname))
 
 
@@ -88,12 +92,35 @@ class my_vgg16_bn(nn.Module):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", "-i", default="data/train", type=str)
+    parser.add_argument("--batch_size", "-b", default=50, type=int)
+    parser.add_argument("--lr", default=0.001, type=float)
+    parser.add_argument("--loss_weight", default=0.0, type=float)
+
+    args = parser.parse_args()
+    inp_dir = args.input
+    batch_size = args.batch_size
+    lr = args.lr
+    loss_weight = args.loss_weight
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("using device :", device)
     print("-" * 30)
 
-    img_paths = sorted(glob('data/test/*/*.jpg'))  # noqa
+    mode = os.path.basename(inp_dir)
+    if os.path.exists(f"{mode}_list.txt"):
+        print(f"use {mode}_list.txt")
+        with open(f"{mode}_list.txt", mode="rt") as f:
+            actual_list = [x.rstrip() for x in f.readlines()]
+        # WARN : ファイル欠損してる可能性
+        img_paths = sorted([os.path.join(inp_dir, x) for x in actual_list])
+    else:
+        img_paths = sorted(glob(os.path.join(inp_dir, '*/*')))
+
+    # NOTE : comment out following state when actual training
     img_paths = img_paths[:5000]
+
 
     raw_labels = [extract_lab(x) for x in img_paths]
     n_classes = len(set(raw_labels))
@@ -122,14 +149,12 @@ if __name__ == "__main__":
         ToTensor(),
         Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
-    batch_size = 50
 
     dataset = FaceDataset(img_paths, labels, embedding_dict, transform=transforms)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     """     setup model         """
     # n_classes = 1000
-    lr = 0.0005
     # NOTE: 特徴抽出層は完全に凍結してるが、学習する内容的に学習し直した方がいい
     #       人物分類で事前学習したほうがよいかもしれない
     model = my_vgg16_bn(out_features=n_classes)
@@ -149,13 +174,13 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
     # LofSoftmaxとNULLLossの利用を検討してもいいのかも
     criterion = nn.CrossEntropyLoss()
+    additional_criterion = nn.MSELoss()
     print("optimizer :", optimizer)
     print("loss :", criterion)
+    print("additional_loss :", additional_criterion)
+    print("additional_loss_weight :", loss_weight)
     print("-" * 30)
 
-    loss_weight = 0
-    print("loss_weight :", loss_weight)
-    extra_criterion = nn.MSELoss()
 
     """     train loop          """
     for epoch in range(60):
@@ -170,15 +195,16 @@ if __name__ == "__main__":
                 outputs = model(imgs)
                 pred_labs = outputs.argmax(dim=1)
                 loss = criterion(outputs, true_labs) + loss_weight * \
-                    (0.5 * n_classes * extra_criterion(outputs, embs))
+                    (0.5 * n_classes * additional_criterion(outputs, embs))
                 loss.backward()
                 optimizer.step()
 
             running_loss += loss.item()
             total += true_labs.size(0)
             correct += (pred_labs == true_labs).sum().item()
-        print('Accuracy: {:.2f} %'.format(100 * float(correct / total)))
+        acc = 100 * float(correct / total)
+        print('Accuracy: {:.2f} %'.format(acc))
         print(f"epoch:{epoch+1} , loss:{running_loss}")
 
         if (epoch + 1) % 5 == 0:
-            save_weight(model, epoch=epoch + 1, output_dir="weight")
+            save_weight(model, epoch=epoch + 1, output_dir="weight", loss)
