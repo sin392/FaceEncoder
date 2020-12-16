@@ -34,9 +34,10 @@ def extract_lab(path):
 
 
 class FaceDataset(Dataset):
-    def __init__(self, img_paths, labels, transform=None):
+    def __init__(self, img_paths, labels, embedding_dict, transform=None):
         self.img_paths = img_paths
         self.labels = labels
+        self.embedding_dict = embedding_dict
         self.transform = transform
 
     def __len__(self):
@@ -45,13 +46,14 @@ class FaceDataset(Dataset):
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx]).convert("RGB")
         lab = self.labels[idx]
+        emb = self.embedding_dict[lab]
 
         if self.transform:
             img = self.transform(img)
         else:
             img = ToTensor()(img)
 
-        return (img, lab)
+        return (img, lab, emb)
 
 
 class my_vgg16_bn(nn.Module):
@@ -122,7 +124,7 @@ if __name__ == "__main__":
     ])
     batch_size = 50
 
-    dataset = FaceDataset(img_paths, labels, transform=transforms)
+    dataset = FaceDataset(img_paths, labels, embedding_dict, transform=transforms)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     """     setup model         """
@@ -159,19 +161,16 @@ if __name__ == "__main__":
     for epoch in range(60):
         running_loss = total = correct = 0.0
 
-        for imgs, true_labs in tqdm(loader):
+        for imgs, true_labs, embs in tqdm(loader):
             # .to(deveice)が再代入じゃないと機能しないときあり
-            imgs, true_labs = imgs.to(device), true_labs.to(device)
+            imgs, true_labs, embs = imgs.to(device), true_labs.to(device), embs.to(device)
 
             with torch.set_grad_enabled(True):  # これがないときまったく学習すすまなかった、デフォだと無効？
                 optimizer.zero_grad()
                 outputs = model(imgs)
                 pred_labs = outputs.argmax(dim=1)
-                # TODO: embeddingsの名前の変更、embeddingのtensorとして適切にラップできてるかの確認
-                embeddings = torch.Tensor([embedding_dict[true_labs[i]]
-                                           for i in range(batch_size)])
                 loss = criterion(outputs, true_labs) + loss_weight * \
-                    (0.5 * n_classes * extra_criterion(outputs, embeddings))
+                    (0.5 * n_classes * extra_criterion(outputs, embs))
                 loss.backward()
                 optimizer.step()
 
