@@ -162,6 +162,8 @@ if __name__ == "__main__":
         param.requires_grad = True
     for param in model.model.classifier.parameters():  # FC
         param.requires_grad = True
+    for param in model.last.parameters():  # FC
+        param.requires_grad = True
 
     # model.parameter()利用する前にmodelのGPU転送が先
     model = model.to(device).train()
@@ -170,6 +172,7 @@ if __name__ == "__main__":
     criterion = nn.CrossEntropyLoss()
     additional_criterion = nn.MSELoss()
 
+    # TODO : スケジューラーの利用
     print("optimizer :", optimizer)
     # print("loss :", criterion)
     # print("additional_loss :", additional_criterion)
