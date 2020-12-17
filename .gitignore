@@ -9,3 +9,5 @@ weight/*
 *.jpg
 *.jpeg
 *.png
+
+nohup.out
