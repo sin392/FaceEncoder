@@ -23,9 +23,9 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True  # デフォルトでは無視される�
 torch.cuda.empty_cache()  # メモリーのクリア
 
 
-def save_weight(model, epoch, output_dir="weight"):
-    date = datetime.now.strftime("%Y-%m-%d-%H-%M-%S")
-    fname = f'{date}-epoch{epoch}.pth'
+def save_weight(model, epoch, acc, output_dir="weight"):
+    date = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    fname = f'{date}-epoch{epoch}-acc{acc}.pth'
     torch.save(model.state_dict(), os.path.join(output_dir, fname))
 
 
@@ -35,7 +35,7 @@ def extract_lab(path):
 
 
 class FaceDataset(Dataset):
-    def __init__(self, img_paths, labels, emb_dict, transform=None):
+    def __init__(self, img_paths, labels, emb_dict=None, transform=None):
         self.img_paths = img_paths
         self.raw_labels = labels
         self.labels = LabelEncoder().fit_transform(labels)
@@ -48,13 +48,13 @@ class FaceDataset(Dataset):
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx]).convert("RGB")
         lab = self.labels[idx]
-        emb = self.emb_dict[self.raw_labels[idx]]
+        emb = self.emb_dict[self.raw_labels[idx]] if self.emb_dict else None
 
         if self.transform:
             img = self.transform(img)
         else:
             img = ToTensor()(img)
-
+        
         return (img, lab, emb)
 
 
@@ -97,15 +97,18 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', '-b', default=50, type=int)
     parser.add_argument('--loss_weight', default=0.0, type=float)
     parser.add_argument('--lr', default=0.0005, type=float)
+    parser.add_argument('--limit', default=0, type=int)
 
     args = parser.parse_args()
     batch_size = args.batch_size
     lr = args.lr
     loss_weight = args.loss_weight # for additional MSELoss
+    limit = args.limit
 
     print('batch_size :', batch_size)
     print('lr :', lr)
     print('loss_weight :', loss_weight)
+    print('limit :', limit)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print("device :", device)
@@ -121,31 +124,36 @@ if __name__ == "__main__":
     else:
         print('use glob')
         tr_img_paths = glob(os.path.join('data/train', '*/*'))
-    if os.path.exists('train_list.txt'):
-        print('use train_list.txt')
-        with open("train_list.txt", mode="rt") as f:
-            tr_img_paths = [os.path.join('data/train', x.strip()) for x in f.readlines()]
+    tr_raw_labels = [extract_lab(x) for x in tr_img_paths]
+
+    if os.path.exists('test_list.txt'):
+        print('use test_list.txt')
+        with open("test_list.txt", mode="rt") as f:
+            te_img_paths = [os.path.join('data/test', x.strip()) for x in f.readlines()]
     else:
         print('use glob')
-        tr_img_paths = glob(os.path.join('data/train', '*/*'))
-
-    tr_raw_labels = [extract_lab(x) for x in tr_img_paths]
+        te_img_paths = glob(os.path.join('data/test', '*/*'))
     te_raw_labels = [extract_lab(x) for x in te_img_paths]
-        
-    exit()    
 
-    tr_img_paths = tr_img_paths[:5000]
+    if limit:
+        tr_unique_classes = sorted(list(set(tr_raw_labels)))
+        tr_temp = tr_raw_labels.index(tr_unique_classes[limit])
+        te_temp = te_raw_labels.index(tr_unique_classes[limit])
+        tr_img_paths = tr_img_paths[:tr_temp]
+        te_img_paths = te_img_paths[:te_temp]
+        tr_raw_labels = tr_raw_labels[:tr_temp]
+        te_raw_labels = te_raw_labels[:te_temp]
 
-
-    tr_unique_classes = list(set(tr_raw_labels))
+    # NOTE : trとteのクラス数は共通
+    tr_unique_classes = sorted(list(set(tr_raw_labels)))
     tr_n_classes = len(set(tr_raw_labels))
-
 
     dummy_embedding = torch.zeros(2048)
     embedding_dict = {key:dummy_embedding for key in tr_unique_classes}
 
+    print("n_classes :", tr_n_classes)
     print("Number of train images :", len(tr_img_paths))
-    print("tr_tr_n_classes :", tr_n_classes)
+    print("Number of test images :", len(te_img_paths))
     # print(collections.Counter(tr_raw_labels))  # NOTE: count value is sorted
     print("-" * 30)
 
@@ -159,8 +167,10 @@ if __name__ == "__main__":
         Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
 
-    dataset = FaceDataset(tr_img_paths, tr_raw_labels, embedding_dict, transform=transforms)
-    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    tr_dataset = FaceDataset(tr_img_paths, tr_raw_labels, embedding_dict, transform=transforms)
+    te_dataset = FaceDataset(te_img_paths, te_raw_labels, None, transform=transforms)
+    tr_loader = DataLoader(tr_dataset, batch_size=batch_size, shuffle=True)
+    te_loader = DataLoader(te_dataset, batch_size=batch_size, shuffle=True)
 
     """     setup model         """
     # NOTE: 特徴抽出層は完全に凍結してるが、学習する内容的に学習し直した方がいい
@@ -194,9 +204,8 @@ if __name__ == "__main__":
 
     """     train loop          """
     for epoch in range(60):
-        running_loss = total = correct = 0.0
-
-        for imgs, true_labs, embs in tqdm(loader):
+        loss = total = correct = 0.0
+        for imgs, true_labs, embs in tqdm(tr_loader):
             # .to(deveice)が再代入じゃないと機能しないときあり
             imgs, true_labs, embs = imgs.to(device), true_labs.to(device), embs.to(device)
 
@@ -208,12 +217,31 @@ if __name__ == "__main__":
                 loss.backward()
                 optimizer.step()
 
-            running_loss += loss.item()
+            loss += loss.item()
             total += true_labs.size(0)
             correct += (pred_labs == true_labs).sum().item()
-        train_acc = 100 * float(correct / total)
-        print('train_acc: {:.2f} %'.format(train_acc))
-        print(f"epoch:{epoch+1} , train_loss:{running_loss}")
+        acc = 100 * float(correct / total)
+        print(f"epoch:{epoch+1} , train_acc: {acc:.2f}, train_loss:{loss:.2f}")
 
         if (epoch + 1) % 5 == 0:
-            save_weight(model, epoch=epoch + 1, output_dir="weight")
+            print('-'*30)
+            loss = total = correct = 0.0
+            for imgs, true_labs, embs in tqdm(tr_loader):
+                # .to(deveice)が再代入じゃないと機能しないときあり
+                imgs, true_labs, embs = imgs.to(device), true_labs.to(device), embs.to(device)
+
+                with torch.set_grad_enabled(False): 
+                    middles, outputs = model(imgs)
+                    pred_labs = outputs.argmax(dim=1)
+                    # NOTE : test時にはMSEは見ない
+                    # loss = criterion(outputs, true_labs) + loss_weight * (0.5 * tr_n_classes * additional_criterion(middles, embs))
+                    loss = criterion(outputs, true_labs)
+
+                loss += loss.item()
+                total += true_labs.size(0)
+                correct += (pred_labs == true_labs).sum().item()
+            acc = 100 * float(correct / total)
+            print(f"epoch:{epoch+1} , test_acc: {acc:.2f} , test_loss:{loss:.2f}")
+            print('-'*30)
+
+            save_weight(model, epoch=epoch + 1, acc, output_dir="weight")
