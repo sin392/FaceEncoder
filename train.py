@@ -16,6 +16,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms import Compose, ToTensor, Resize, Normalize
+import argparse
 
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True  # デフォルトでは無視される画像もロード
@@ -34,9 +35,11 @@ def extract_lab(path):
 
 
 class FaceDataset(Dataset):
-    def __init__(self, img_paths, labels, transform=None):
+    def __init__(self, img_paths, labels, emb_dict, transform=None):
         self.img_paths = img_paths
-        self.labels = labels
+        self.raw_labels = labels
+        self.labels = LabelEncoder().fit_transform(labels)
+        self.emb_dict = emb_dict
         self.transform = transform
 
     def __len__(self):
@@ -45,13 +48,14 @@ class FaceDataset(Dataset):
     def __getitem__(self, idx):
         img = Image.open(self.img_paths[idx]).convert("RGB")
         lab = self.labels[idx]
+        emb = self.emb_dict[self.raw_labels[idx]]
 
         if self.transform:
             img = self.transform(img)
         else:
             img = ToTensor()(img)
 
-        return (img, lab)
+        return (img, lab, emb)
 
 
 class my_vgg16_bn(nn.Module):
@@ -70,7 +74,9 @@ class my_vgg16_bn(nn.Module):
                 nn.Dropout(p=0.5, inplace=False),
                 nn.Linear(in_features=4096,
                           out_features=middle_features, bias=True),
-            ),
+            )
+        )
+        self.last = nn.Sequential(
             nn.Sequential(
                 nn.ReLU(inplace=True),
                 nn.Dropout(p=0.5, inplace=False),
@@ -81,28 +87,55 @@ class my_vgg16_bn(nn.Module):
         )
 
     def forward(self, x):
-        x = self.model(x)
-        return x
+        middle = self.model(x)
+        out = self.last(middle)
+        return middle, out
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--batch_size', '-b', default=50, type=int)
+    parser.add_argument('--loss_weight', default=0.0, type=float)
+    parser.add_argument('--lr', default=0.0005, type=float)
+
+    args = parser.parse_args()
+    batch_size = args.batch_size
+    lr = args.lr
+    loss_weight = args.loss_weight # for additional MSELoss
+
+    print('batch_size :', batch_size)
+    print('lr :', lr)
+    print('loss_weight :', loss_weight)
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print("using device :", device)
+    print("device :", device)
     print("-" * 30)
 
-    img_paths = sorted(glob('data/test/*/*.jpg'))  # noqa
+    inp_dir = 'data/train'
+    if os.path.exists(f'train_list.txt'):
+        print(f'use train_list.txt')
+        with open(f"train_list.txt", mode="rt") as f:
+            img_paths = [os.path.join(inp_dir, x.strip()) for x in f.readlines()]
+    else:
+        print('use glob')
+        img_paths = glob(os.path.join(inp_dir, '*/*'))
+
     img_paths = img_paths[:5000]
 
     raw_labels = [extract_lab(x) for x in img_paths]
+    unique_classes = list(set(raw_labels))
+    n_classes = len(set(raw_labels))
 
-    # labels = OneHotEncoder().fit_transform(np.array(raw_labels).reshape(-1, 1))
-    labels = LabelEncoder().fit_transform(raw_labels)
 
-    print("Number of images :", len(set(img_paths)))
-    print("Number of unique labels :", len(set(raw_labels)))
-    print(collections.Counter(raw_labels))  # NOTE: count value is sorted
+    dummy_embedding = torch.zeros(2048)
+    embedding_dict = {key:dummy_embedding for key in unique_classes}
+
+    print("Number of images :", len(img_paths))
+    print("n_classes :", n_classes)
+    # print(collections.Counter(raw_labels))  # NOTE: count value is sorted
     print("-" * 30)
 
+    # exit()
     """     setup data         """
     # TODO: リサイズのサイズ策定
     # Normalizeは？
@@ -111,15 +144,11 @@ if __name__ == "__main__":
         ToTensor(),
         Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
-    batch_size = 50
 
-    dataset = FaceDataset(img_paths, labels, transform=transforms)
+    dataset = FaceDataset(img_paths, raw_labels, embedding_dict, transform=transforms)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     """     setup model         """
-    # n_classes = 1000
-    n_classes = len(set(raw_labels))
-    lr = 0.0005
     # NOTE: 特徴抽出層は完全に凍結してるが、学習する内容的に学習し直した方がいい
     #       人物分類で事前学習したほうがよいかもしれない
     model = my_vgg16_bn(out_features=n_classes)
@@ -139,23 +168,26 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
     # LofSoftmaxとNULLLossの利用を検討してもいいのかも
     criterion = nn.CrossEntropyLoss()
+    additional_criterion = nn.MSELoss()
+
     print("optimizer :", optimizer)
-    print("loss :", criterion)
+    # print("loss :", criterion)
+    # print("additional_loss :", additional_criterion)
     print("-" * 30)
 
     """     train loop          """
     for epoch in range(60):
         running_loss = total = correct = 0.0
 
-        for imgs, true_labs in tqdm(loader):
+        for imgs, true_labs, embs in tqdm(loader):
             # .to(deveice)が再代入じゃないと機能しないときあり
-            imgs, true_labs = imgs.to(device), true_labs.to(device)
+            imgs, true_labs, embs = imgs.to(device), true_labs.to(device), embs.to(device)
 
             with torch.set_grad_enabled(True):  # これがないときまったく学習すすまなかった、デフォだと無効？
                 optimizer.zero_grad()
-                outputs = model(imgs)
+                middles, outputs = model(imgs)
                 pred_labs = outputs.argmax(dim=1)
-                loss = criterion(outputs, true_labs)
+                loss = criterion(outputs, true_labs) + loss_weight * (0.5 * n_classes * additional_criterion(middles, embs))
                 loss.backward()
                 optimizer.step()
 
