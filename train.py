@@ -111,28 +111,42 @@ if __name__ == "__main__":
     print("device :", device)
     print("-" * 30)
 
-    inp_dir = 'data/train'
-    if os.path.exists(f'train_list.txt'):
-        print(f'use train_list.txt')
-        with open(f"train_list.txt", mode="rt") as f:
-            img_paths = [os.path.join(inp_dir, x.strip()) for x in f.readlines()]
+    # NOTE : 元々のtestデータセットは人物集合が異なり、softmaxでの学習における検証に適さないので、
+    # trainセットから各クラス１０サンプルずつサンプリングしてテストデータセットとした。(split_actual_list.py)
+    # TODO : 元々のtestのデータも学習に含める？
+    if os.path.exists('train_list.txt'):
+        print('use train_list.txt')
+        with open("train_list.txt", mode="rt") as f:
+            tr_img_paths = [os.path.join('data/train', x.strip()) for x in f.readlines()]
     else:
         print('use glob')
-        img_paths = glob(os.path.join(inp_dir, '*/*'))
+        tr_img_paths = glob(os.path.join('data/train', '*/*'))
+    if os.path.exists('train_list.txt'):
+        print('use train_list.txt')
+        with open("train_list.txt", mode="rt") as f:
+            tr_img_paths = [os.path.join('data/train', x.strip()) for x in f.readlines()]
+    else:
+        print('use glob')
+        tr_img_paths = glob(os.path.join('data/train', '*/*'))
 
-    img_paths = img_paths[:5000]
+    tr_raw_labels = [extract_lab(x) for x in tr_img_paths]
+    te_raw_labels = [extract_lab(x) for x in te_img_paths]
+        
+    exit()    
 
-    raw_labels = [extract_lab(x) for x in img_paths]
-    unique_classes = list(set(raw_labels))
-    n_classes = len(set(raw_labels))
+    tr_img_paths = tr_img_paths[:5000]
+
+
+    tr_unique_classes = list(set(tr_raw_labels))
+    tr_n_classes = len(set(tr_raw_labels))
 
 
     dummy_embedding = torch.zeros(2048)
-    embedding_dict = {key:dummy_embedding for key in unique_classes}
+    embedding_dict = {key:dummy_embedding for key in tr_unique_classes}
 
-    print("Number of images :", len(img_paths))
-    print("n_classes :", n_classes)
-    # print(collections.Counter(raw_labels))  # NOTE: count value is sorted
+    print("Number of train images :", len(tr_img_paths))
+    print("tr_tr_n_classes :", tr_n_classes)
+    # print(collections.Counter(tr_raw_labels))  # NOTE: count value is sorted
     print("-" * 30)
 
     # exit()
@@ -145,13 +159,13 @@ if __name__ == "__main__":
         Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
     ])
 
-    dataset = FaceDataset(img_paths, raw_labels, embedding_dict, transform=transforms)
+    dataset = FaceDataset(tr_img_paths, tr_raw_labels, embedding_dict, transform=transforms)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     """     setup model         """
     # NOTE: 特徴抽出層は完全に凍結してるが、学習する内容的に学習し直した方がいい
     #       人物分類で事前学習したほうがよいかもしれない
-    model = my_vgg16_bn(out_features=n_classes)
+    model = my_vgg16_bn(out_features=tr_n_classes)
     # HACK: featuresの上にmodelという階層ができてしまっているので、モデルクラス内での学習済みモデルの利用を改良したい
     #       CNNのrequires_gradをTrueにするとメモリーが枯渇する
     for param in model.model.features.parameters():  # CNN
@@ -190,7 +204,7 @@ if __name__ == "__main__":
                 optimizer.zero_grad()
                 middles, outputs = model(imgs)
                 pred_labs = outputs.argmax(dim=1)
-                loss = criterion(outputs, true_labs) + loss_weight * (0.5 * n_classes * additional_criterion(middles, embs))
+                loss = criterion(outputs, true_labs) + loss_weight * (0.5 * tr_n_classes * additional_criterion(middles, embs))
                 loss.backward()
                 optimizer.step()
 
@@ -198,7 +212,7 @@ if __name__ == "__main__":
             total += true_labs.size(0)
             correct += (pred_labs == true_labs).sum().item()
         train_acc = 100 * float(correct / total)
-        print('train_acc: {:.2f} %'.format(train_acc)
+        print('train_acc: {:.2f} %'.format(train_acc))
         print(f"epoch:{epoch+1} , train_loss:{running_loss}")
 
         if (epoch + 1) % 5 == 0:
