@@ -22,7 +22,7 @@ start = args.start
 
 mode = os.path.basename(inp_dir)
 if os.path.exists(f'{mode}_list.txt'):
-    print(f'ue {mode}_list.txt')
+    print(f'use {mode}_list.txt')
     with open(f"{mode}_list.txt", mode="rt") as f:
         img_paths = [os.path.join(inp_dir, x.rstrip()) for x in f.readlines()]
 else:
