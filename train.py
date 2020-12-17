@@ -197,8 +197,9 @@ if __name__ == "__main__":
             running_loss += loss.item()
             total += true_labs.size(0)
             correct += (pred_labs == true_labs).sum().item()
-        print('Accuracy: {:.2f} %'.format(100 * float(correct / total)))
-        print(f"epoch:{epoch+1} , loss:{running_loss}")
+        train_acc = 100 * float(correct / total)
+        print('train_acc: {:.2f} %'.format(train_acc)
+        print(f"epoch:{epoch+1} , train_loss:{running_loss}")
 
         if (epoch + 1) % 5 == 0:
             save_weight(model, epoch=epoch + 1, output_dir="weight")
