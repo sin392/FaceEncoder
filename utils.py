@@ -19,8 +19,8 @@ def read_path_list(fname, inp_dir, s_id=0):
             while s_id > 0 and s_from == 0:
                 try:
                     s_from = [os.path.dirname(x) for x in lines].index(f'n{str(s_id).zfill(6)}')
-                except:
-                    s_id + 1
+                except Exception:
+                    s_id += 1
             img_paths = [os.path.join(inp_dir, x.strip()) for x in lines[s_from:]]
     else:
         print('use glob')

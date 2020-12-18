@@ -41,17 +41,21 @@ for i in tqdm(range(0, len(img_paths), batch_size)):
         batch_paths = img_paths[i:i + batch_size]
     else:
         batch_paths = img_paths[i:]
-    batch_img = [Image.open(path).resize((image_size, image_size))
-                 for path in batch_paths]
-    save_paths = [path.replace('data', 'processed_data')
-                  for path in batch_paths]
     try:
+        batch_img = [Image.open(repr(path)).resize((image_size, image_size))
+                     for path in batch_paths]
+        save_paths = [repr(path).replace('data', 'processed_data')
+                      for path in batch_paths]
         model(batch_img, save_path=save_paths)
     except Exception:
         # バッチ処理したいが、顔検出できなかったときの個別対応ができない
         # →　例外発生したら個別に処理
-        for j in range(batch_size):
+        for path in batch_paths:
             try:
-                model(batch_img[j], save_path=save_paths[j])
+                img = Image.open(repr(path)).resize((image_size, image_size))
+                save_path = repr(path).replace('data', 'processed_data')
+                model(img, save_path)
             except TypeError:
-                print(f'face not found : {batch_paths[j]}')
+                print(f'face not found : {path}')
+            except OSError:
+                print(f'Input Error : {path}')

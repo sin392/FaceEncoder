@@ -11,3 +11,4 @@ weight/*
 *.png
 
 nohup.out
+Pipfile.lock
