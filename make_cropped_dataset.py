@@ -4,6 +4,7 @@ import os
 from tqdm import tqdm
 import argparse
 import torch
+from glob import glob
 
 from utils import read_path_list
 
@@ -14,16 +15,27 @@ parser.add_argument('--input', '-i', default='./data/train', type=str)
 parser.add_argument('--batch', '-b', default=150, type=int)
 parser.add_argument('--size', '-s', default=224, type=int)
 parser.add_argument('--startid', default=0, type=int)
+parser.add_argument('--diff', action='store_true')
 
 args = parser.parse_args()
 inp_dir = args.input
 batch_size = args.batch
 image_size = args.size
 s_id = args.startid
-
+diff = args.diff
 
 mode = os.path.basename(inp_dir)
-img_paths = read_path_list(fname=f'{mode}_list.txt', inp_dir=f'data/{mode}', s_id=s_id)
+img_paths = read_path_list(
+    fname=f'{mode}_list.txt', inp_dir=f'./data/{mode}', s_id=s_id)
+
+if diff:
+    print('process only diff file')
+    processed_img_paths = glob(os.path.join(
+        inp_dir.replace('data', 'processed_data'), '*/*'))
+    processed_img_paths
+    img_paths = list(set(
+        img_paths) - set([x.replace('processed_data', 'data') for x in processed_img_paths]))
+
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 print(f'start from id: n{str(s_id).zfill(6)}')
@@ -42,9 +54,9 @@ for i in tqdm(range(0, len(img_paths), batch_size)):
     else:
         batch_paths = img_paths[i:]
     try:
-        batch_img = [Image.open(repr(path)).resize((image_size, image_size))
+        batch_img = [Image.open(path).resize((image_size, image_size))
                      for path in batch_paths]
-        save_paths = [repr(path).replace('data', 'processed_data')
+        save_paths = [path.replace('data', 'processed_data')
                       for path in batch_paths]
         model(batch_img, save_path=save_paths)
     except Exception:
@@ -52,8 +64,8 @@ for i in tqdm(range(0, len(img_paths), batch_size)):
         # →　例外発生したら個別に処理
         for path in batch_paths:
             try:
-                img = Image.open(repr(path)).resize((image_size, image_size))
-                save_path = repr(path).replace('data', 'processed_data')
+                img = Image.open(path).resize((image_size, image_size))
+                save_path = path.replace('data', 'processed_data')
                 model(img, save_path)
             except TypeError:
                 print(f'face not found : {path}')

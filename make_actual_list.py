@@ -10,7 +10,7 @@ with open(f"original_{mode}_list.txt", mode="rt") as f:
 
 term = "dev" if mode == "train" else "test"
 dev = db[db["Set"] == term]
-vf2_ids = dev["VGGFace2ID"].tolist() # actually used ids
+vf2_ids = dev["VGGFace2ID"].tolist()  # actually used ids
 
 print(len(vf2_ids))
 
