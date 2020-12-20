@@ -5,10 +5,12 @@ from tqdm import tqdm
 import argparse
 import torch
 from glob import glob
+import logging
 
 from utils import read_path_list
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+logging.basicConfig(filename='logs/make_cropped_dataset.log')
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--input', '-i', default='./data/train', type=str)
@@ -68,6 +70,6 @@ for i in tqdm(range(0, len(img_paths), batch_size)):
                 save_path = path.replace('data', 'processed_data')
                 model(img, save_path)
             except TypeError:
-                print(f'face not found : {path}')
+                logging.warning(f'face not found : {path}')
             except OSError:
-                print(f'Input Error : {path}')
+                logging.error(f'Input Error : {path}')
